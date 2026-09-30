@@ -122,13 +122,20 @@ export default function MatrixDetail() {
   };
 
   const handleSaveInfo = async () => {
-    await updateMatrix(matrix.id, {
+    const result = await updateMatrix(matrix.id, {
       engraver: editForm.engraver.trim(),
       note: editForm.note.trim(),
       availability: editForm.availability,
     });
     setEditing(false);
-    pushToast('字面信息已更新');
+    const purged = result.purge?.removedSlots ?? 0;
+    pushToast(
+      editForm.availability === '可用'
+        ? '字面信息已更新'
+        : purged > 0
+          ? `字面信息已更新，字模转为${editForm.availability}，已同步清空 ${purged} 个占用格位`
+          : `字面信息已更新，字模转为${editForm.availability}`,
+    );
   };
 
   const handleAddDefect = async (e: FormEvent) => {
@@ -149,11 +156,13 @@ export default function MatrixDetail() {
       pushToast('缺损登记未通过校验，请按提示修正', 'warn');
       return;
     }
-    await addDefect(input);
+    const result = await addDefect(input);
+    const purged = result.purge?.removedSlots ?? 0;
     pushToast(
       defectForm.availability === '可用'
         ? '已登记缺损，字模保持可用'
-        : `已登记缺损，「${matrix.character}」已转为${defectForm.availability}`,
+        : `已登记缺损，「${matrix.character}」已转为${defectForm.availability}` +
+            (purged > 0 ? `，已同步清空 ${purged} 个占用格位` : ''),
     );
     setDefectForm((prev) => ({ ...prev, handling: '', note: '' }));
     setDefectErrors({});
@@ -205,8 +214,14 @@ export default function MatrixDetail() {
   };
 
   const handleRemove = async () => {
-    await removeMatrix(matrix.id);
-    pushToast(`已删除字模「${matrix.character}」的档案`, 'warn');
+    const purge = await removeMatrix(matrix.id);
+    const purged = purge.removedSlots;
+    pushToast(
+      `已清退字模「${matrix.character}」（${matrix.code}）` +
+        (purged > 0 ? `，同步清空 ${purged} 个占用格位；` : '；') +
+        '缺损、试印记录仍保留可查',
+      'warn',
+    );
     navigate('/');
   };
 
@@ -248,7 +263,7 @@ export default function MatrixDetail() {
           </button>
           {matrix.availability !== '可用' ? (
             <button type="button" className="mt-btn" data-testid="remove-matrix" onClick={handleRemove}>
-              删除档案
+              清退字模
             </button>
           ) : null}
           <Link className="mt-btn" to="/" data-testid="detail-back">

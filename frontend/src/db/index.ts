@@ -15,6 +15,8 @@ export const DB_NAME = 'gbmovabletype-db';
  * v1 建 matrices
  * v2 加 cases 表与 matrixId 索引
  * v3 加 defects / proofs 表，并为停用字模回填缺损原因
+ * v4 字模与字盘协同：清掉字盘里「停用 / 待补刻 / 已不存在」字模的残留格位，
+ *    并重写 matrixId，保证占格字模均为可用字模（格位不留空引用）
  */
 class MovableTypeDb extends Dexie {
   matrices!: Table<TypeMatrix, string>;
@@ -78,6 +80,33 @@ class MovableTypeDb extends Dexie {
           });
         }
       });
+    this.version(4)
+      .stores({
+        matrices: 'id, code, character, font, sizeName, material, availability',
+        cases: 'id, code, kind, workStation, *matrixId',
+        defects: 'id, matrixId, defectType, severity, availability, foundDate',
+        proofs: 'id, matrixId, sampleNo, clarity, proofDate',
+      })
+      .upgrade(async (tx) => {
+        // v4：字模停用 / 清退必须同步清空占格。历史字盘可能仍挂着已停用、
+        // 待补刻或已删除的字模，这里统一摘掉这些格位并重写多值索引。
+        const matrices: TypeMatrix[] = await tx.table('matrices').toArray();
+        const usable = new Set(
+          matrices.filter((m) => m.availability === '可用').map((m) => m.id),
+        );
+        const caseTable = tx.table('cases');
+        const rows: TypeCase[] = await caseTable.toArray();
+        for (const row of rows) {
+          const kept = (row.slots ?? []).filter((s) => s.matrixId && usable.has(s.matrixId));
+          if (kept.length === (row.slots ?? []).length) continue;
+          const sorted = kept.sort((a, b) => a.row - b.row || a.col - b.col);
+          await caseTable.update(row.id, {
+            slots: sorted,
+            matrixId: matrixIdsOf(sorted),
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      });
   }
 }
 
@@ -129,14 +158,12 @@ const SEED_CASE_A_SLOTS: SeedSlot[] = [
   { row: 0, col: 1, matrixId: 'm-1002', character: '字' },
   { row: 0, col: 2, matrixId: 'm-1003', character: '印' },
   { row: 0, col: 3, matrixId: 'm-1004', character: '刷' },
-  { row: 1, col: 0, matrixId: 'm-1005', character: '排' },
   { row: 1, col: 1, matrixId: 'm-1006', character: '版' },
   { row: 1, col: 2, matrixId: 'm-1007', character: '铅' },
   { row: 1, col: 3, matrixId: 'm-1009', character: '铜' },
   { row: 2, col: 0, matrixId: 'm-1010', character: '刻' },
   { row: 2, col: 1, matrixId: 'm-1012', character: '纸' },
   { row: 2, col: 2, matrixId: 'm-1013', character: '宋' },
-  { row: 2, col: 3, matrixId: 'm-1014', character: '体' },
 ];
 
 const SEED_CASE_B_SLOTS: SeedSlot[] = [

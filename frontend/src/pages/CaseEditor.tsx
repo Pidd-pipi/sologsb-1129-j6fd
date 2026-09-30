@@ -276,7 +276,14 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
     const key = rcKey(row, col);
     setSelectedKey(key);
     if (pending) {
-      api.place(pending.matrix, row, col);
+      const ok = api.place(pending.matrix, row, col);
+      if (!ok) {
+        pushToast(
+          `字模 ${pending.matrix.code} 当前为「${pending.matrix.availability}」，不能落位占格`,
+          'error',
+        );
+        return;
+      }
       pushToast(
         `已在 ${rowLabel(row)}${col + 1} 落位「${pending.matrix.character}」（${pending.matrix.code}）`,
       );
@@ -298,13 +305,21 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
   };
 
   const handleSave = async () => {
+    let ok = false;
     try {
-      await api.save();
-      patch({ slots: api.slots });
-      pushToast(`字盘 ${typeCase.code} 布局已保存（${api.slots.length} 格）`);
+      ok = await api.save();
     } catch (err) {
       pushToast(err instanceof Error ? err.message : '保存失败', 'error');
+      return;
     }
+    if (!ok) {
+      // 与字模现状 / 其他窗口入库格位冲突：已拒绝保存，布局草稿原样保留
+      pushToast('保存被拒绝：字模或格位现状已变化，请按下方冲突提示处理（草稿已保留）', 'error');
+      return;
+    }
+    // 用规范化后的落库版本回填 localStorage 草稿
+    patch({ slots: api.slots });
+    pushToast(`字盘 ${typeCase.code} 布局已保存（${api.slots.length} 格）`);
   };
 
   return (
@@ -321,7 +336,7 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className="mt-btn mt-btn-primary" data-testid="save-layout-btn" onClick={handleSave} disabled={api.saving}>
+            <button type="button" className="mt-btn mt-btn-primary" data-testid="save-layout-btn" onClick={handleSave} disabled={api.saving || api.capacity.overCapacity}>
               {api.saving ? '保存中…' : api.dirty ? '保存布局（有改动）' : '保存布局'}
             </button>
             <button type="button" className="mt-btn" data-testid="revert-layout-btn" onClick={api.revert} disabled={!api.dirty}>
@@ -382,6 +397,44 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
                 </p>
               ) : null}
             </div>
+            {api.saveError && api.saveError.length > 0 ? (
+              <div
+                className="mt-2 rounded border border-seal/50 bg-seal-pale/70 px-3 py-2 text-xs text-seal"
+                data-testid="save-conflict-panel"
+              >
+                <p className="font-semibold" data-testid="save-conflict-title">
+                  保存被拒绝：已按字模现状与其他窗口的入库格位核对，下列冲突需先处理（当前布局草稿已保留）
+                </p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5" data-testid="save-conflict-list">
+                  {api.saveError.map((issue, i) => (
+                    <li key={`${issue.kind}-${i}`} data-testid={`save-conflict-${issue.kind}`}>
+                      {issue.message}
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="mt-btn"
+                    data-testid="conflict-revert-btn"
+                    onClick={() => {
+                      api.revert();
+                      pushToast('已回到其他窗口保存后的最新版本，请在此基础上重新落位', 'warn');
+                    }}
+                  >
+                    撤回到最新入库版本
+                  </button>
+                  <button
+                    type="button"
+                    className="mt-btn"
+                    data-testid="conflict-keep-draft-btn"
+                    onClick={api.dismissSaveError}
+                  >
+                    知道了，继续改草稿
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="space-y-3">

@@ -102,11 +102,14 @@ export default function DefectBoard() {
     }
     setSubmitting(true);
     try {
-      const row = await addDefect(input);
+      const result = await addDefect(input);
+      const row = result.defect!;
+      const purged = result.purge?.removedSlots ?? 0;
       pushToast(
         row.availability === '可用'
           ? `已登记「${row.character}」缺损，字模保持可用`
-          : `已登记「${row.character}」缺损，字模转为${row.availability}并进入补刻清单`,
+          : `已登记「${row.character}」缺损，字模转为${row.availability}并进入补刻清单` +
+              (purged > 0 ? `，已同步清空 ${purged} 个占用格位` : ''),
       );
       patch({ handling: '', note: '' });
       setErrors({});

@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import { db, ensureSeed } from '../db';
+import { saveCaseSlotsChecked, type SaveSlotsOptions } from '../db/caseCoordinator';
 import type { CaseInput, CaseSlot, TypeCase } from '../types/case';
 import { capacityOf } from '../types/case';
 import { makeId, toPlain } from '../utils/format';
-import { matrixIdsOf, validateCapacity } from '../utils/layout';
+import { validateCapacity } from '../utils/layout';
 
 interface CaseState {
   cases: TypeCase[];
@@ -13,7 +14,7 @@ interface CaseState {
   load: () => Promise<void>;
   createCase: (input: CaseInput) => Promise<TypeCase>;
   updateCase: (id: string, patch: Partial<TypeCase>) => Promise<void>;
-  saveSlots: (id: string, slots: CaseSlot[]) => Promise<void>;
+  saveSlots: (id: string, slots: CaseSlot[], options?: SaveSlotsOptions) => Promise<TypeCase>;
   removeCase: (id: string) => Promise<void>;
 }
 
@@ -71,20 +72,21 @@ export const useCaseStore = create<CaseState>((set, get) => ({
     set((s) => ({ cases: s.cases.map((c) => (c.id === id ? { ...c, ...next } : c)) }));
   },
 
-  /** 保存格位布局：同时刷新 matrixId 多值索引，便于按字模反查字盘 */
-  saveSlots: async (id, slots) => {
+  /**
+   * 保存格位布局：保存前在同一事务内复核字模现状与其他窗口已入库格位
+   * （可用性、被清退、被别的字盘占用、同一字盘被并发改动、容量 / 越界）。
+   * 冲突时抛出 SlotSaveConflictError，不改库；调用方据此保留草稿。
+   * 成功后刷新 slots 与 matrixId 多值索引，返回最新字盘。
+   */
+  saveSlots: async (id, slots, options) => {
     const current = get().cases.find((c) => c.id === id);
     if (!current) throw new Error('未找到字盘');
-    const check = validateCapacity(current.rows, current.cols, slots);
-    if (check.overCapacity) throw new Error(check.message);
-    const plainSlots = toPlain(slots);
-    const next: Partial<TypeCase> = {
-      slots: plainSlots,
-      matrixId: matrixIdsOf(plainSlots),
-      updatedAt: new Date().toISOString(),
-    };
-    await db.cases.update(id, next);
-    set((s) => ({ cases: s.cases.map((c) => (c.id === id ? { ...c, ...next } : c)) }));
+    const saved = await saveCaseSlotsChecked(id, slots, {
+      baseSlots: options?.baseSlots ?? current.slots,
+      baseUpdatedAt: options?.baseUpdatedAt ?? current.updatedAt,
+    });
+    set((s) => ({ cases: s.cases.map((c) => (c.id === id ? saved.typeCase : c)) }));
+    return saved.typeCase;
   },
 
   removeCase: async (id) => {
