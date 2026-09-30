@@ -303,6 +303,7 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
       patch({ slots: api.slots });
       pushToast(`字盘 ${typeCase.code} 布局已保存（${api.slots.length} 格）`);
     } catch (err) {
+      // 保存被拒绝（容量超限 / 字模已停用或清退 / 已落在其他字盘）：草稿保留在本地，不写回 IndexedDB
       pushToast(err instanceof Error ? err.message : '保存失败', 'error');
     }
   };
@@ -379,6 +380,11 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
               {api.dirty ? (
                 <p className="mt-1" data-testid="dirty-hint">
                   当前布局尚未保存到本机档案，点「保存布局」写回 IndexedDB。
+                </p>
+              ) : null}
+              {api.saveError ? (
+                <p className="mt-1 border-t border-seal/30 pt-1 text-seal" data-testid="save-error">
+                  {api.saveError}
                 </p>
               ) : null}
             </div>

@@ -20,6 +20,8 @@ export interface CaseSlotsApi {
   /** 与本机落库版本是否有差异 */
   dirty: boolean;
   saving: boolean;
+  /** 最近一次保存被拒绝的原因（容量 / 字模现状 / 其他字盘占用），空串表示无 */
+  saveError: string;
   conflicts: SlotConflicts;
   capacity: ReturnType<typeof validateCapacity>;
   fillPercent: number;
@@ -46,10 +48,12 @@ export function useCaseSlots(typeCase: TypeCase | undefined): CaseSlotsApi {
   const saveSlots = useCaseStore((s) => s.saveSlots);
   const [slots, setSlots] = useState<CaseSlot[]>(typeCase?.slots ?? []);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   const version = `${typeCase?.id ?? ''}#${typeCase?.updatedAt ?? ''}`;
   useEffect(() => {
     setSlots(typeCase?.slots ?? []);
+    setSaveError('');
     // 仅在切换字盘或落库版本变化时同步
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version]);
@@ -74,28 +78,46 @@ export function useCaseSlots(typeCase: TypeCase | undefined): CaseSlotsApi {
       col,
       character: matrix.character,
       matrixId: matrix.id,
+      matrixCode: matrix.code,
       placedAt: new Date().toISOString(),
     };
     setSlots((cur) => placeSlot(cur, slot));
+    setSaveError('');
   }, []);
 
   const take = useCallback((row: number, col: number) => {
     setSlots((cur) => removeSlot(cur, row, col));
+    setSaveError('');
   }, []);
 
   const swap = useCallback((a: RCCell, b: RCCell) => {
     setSlots((cur) => swapSlots(cur, a, b));
+    setSaveError('');
   }, []);
 
-  const clear = useCallback(() => setSlots([]), []);
-  const replaceAll = useCallback((next: CaseSlot[]) => setSlots(next), []);
-  const revert = useCallback(() => setSlots(typeCase?.slots ?? []), [typeCase?.slots]);
+  const clear = useCallback(() => {
+    setSlots([]);
+    setSaveError('');
+  }, []);
+  const replaceAll = useCallback((next: CaseSlot[]) => {
+    setSlots(next);
+    setSaveError('');
+  }, []);
+  const revert = useCallback(() => {
+    setSlots(typeCase?.slots ?? []);
+    setSaveError('');
+  }, [typeCase?.slots]);
 
   const save = useCallback(async () => {
     if (!typeCase) return;
     setSaving(true);
+    setSaveError('');
     try {
       await saveSlots(typeCase.id, slots);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '保存失败';
+      setSaveError(message);
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -105,6 +127,7 @@ export function useCaseSlots(typeCase: TypeCase | undefined): CaseSlotsApi {
     slots,
     dirty,
     saving,
+    saveError,
     conflicts,
     capacity,
     fillPercent,

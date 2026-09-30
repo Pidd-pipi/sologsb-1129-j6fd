@@ -6,6 +6,7 @@ import type { MatrixInput, TypeMatrix } from '../types/matrix';
 import { ptOfSize } from '../types/matrix';
 import type { ProofInput, ProofRecord } from '../types/proof';
 import { makeId, toPlain, todayStr } from '../utils/format';
+import { useCaseStore } from './caseStore';
 
 interface MatrixState {
   matrices: TypeMatrix[];
@@ -83,7 +84,14 @@ export const useMatrixStore = create<MatrixState>((set, get) => ({
     const plain = toPlain(patch);
     const next: Partial<TypeMatrix> = { ...plain, updatedAt: new Date().toISOString() };
     if (plain.sizeName) next.sizePt = ptOfSize(plain.sizeName);
-    await db.matrices.update(id, next);
+    const becomesUnavailable = Boolean(plain.availability) && plain.availability !== '可用';
+    await db.transaction('rw', db.matrices, db.cases, async () => {
+      await db.matrices.update(id, next);
+      if (becomesUnavailable) {
+        // 可用性变更为停用 / 待补刻：同步清掉该字模在所有字盘里的格位，避免不可用字模占格
+        await useCaseStore.getState().clearMatrixFromCases(id);
+      }
+    });
     set((s) => ({
       matrices: s.matrices
         .map((m) => (m.id === id ? { ...m, ...next } : m))
@@ -92,17 +100,15 @@ export const useMatrixStore = create<MatrixState>((set, get) => ({
   },
 
   removeMatrix: async (id) => {
-    await db.transaction('rw', db.matrices, db.defects, db.proofs, async () => {
+    await db.transaction('rw', db.matrices, db.cases, async () => {
       await db.matrices.delete(id);
-      const defectIds = (await db.defects.where('matrixId').equals(id).toArray()).map((d) => d.id);
-      const proofIds = (await db.proofs.where('matrixId').equals(id).toArray()).map((p) => p.id);
-      await db.defects.bulkDelete(defectIds);
-      await db.proofs.bulkDelete(proofIds);
+      // 清退已占用字模：同步清掉它在所有字盘里的全部格位
+      await useCaseStore.getState().clearMatrixFromCases(id);
+      // 缺损记录与试印记录保留，仍可按字模编号回溯查询
     });
     set((s) => ({
       matrices: s.matrices.filter((m) => m.id !== id),
-      defects: s.defects.filter((d) => d.matrixId !== id),
-      proofs: s.proofs.filter((p) => p.matrixId !== id),
+      // 缺损、试印记录保留，不随字模清退删除
     }));
   },
 

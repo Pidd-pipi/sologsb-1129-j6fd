@@ -196,7 +196,11 @@ function buildSeed() {
     updatedAt: now,
   }));
   const toSlots = (rows: SeedSlot[]): CaseSlot[] =>
-    rows.map((s) => ({ ...s, placedAt: now }));
+    rows.map((s) => ({
+      ...s,
+      matrixCode: SEED_MATRICES.find((m) => m.id === s.matrixId)?.code ?? s.matrixId,
+      placedAt: now,
+    }));
   const cases: TypeCase[] = [
     {
       id: 'case-1001',

@@ -1,5 +1,6 @@
 import type { CaseSlot } from '../types/case';
 import { capacityOf } from '../types/case';
+import type { TypeMatrix } from '../types/matrix';
 
 /** 行列号与格位索引互算、字盘容量校验与冲突检测 */
 
@@ -159,4 +160,90 @@ export function fillRate(slots: CaseSlot[], rows: number, cols: number): number 
 /** 找出某字模在字盘中的格位 */
 export function findSlotsByMatrix(slots: CaseSlot[], matrixId: string): CaseSlot[] {
   return slots.filter((s) => s.matrixId === matrixId);
+}
+
+/** 从格位列表中移除指定字模的所有落位（字模停用 / 清退时同步清格位用） */
+export function removeSlotsByMatrix(slots: CaseSlot[], matrixId: string): CaseSlot[] {
+  return slots.filter((s) => s.matrixId !== matrixId);
+}
+
+/** 保存前核对发现的冲突：字模现状或其他字盘入库格位不一致 */
+export interface SlotSaveConflict {
+  /** missing=字模已被清退；unavailable=字模被停用/待补刻；duplicate=已落在其他字盘；duplicateInCase=本盘内重复落位 */
+  kind: 'missing' | 'unavailable' | 'duplicate' | 'duplicateInCase';
+  matrixId: string;
+  /** 字模编号（优先用落位时冗余保存的编号，其次回退 matrixId） */
+  matrixCode: string;
+  character: string;
+  /** 可读的冲突说明，包含编号与所在格位 / 字盘 */
+  message: string;
+}
+
+/**
+ * 保存格位前的核对：以最新读取的字模档案与其他字盘格位为准，
+ * 检查草稿中的每一枚字模是否仍然存在、仍然可用、且没有被其他字盘占用。
+ * 返回冲突列表；空数组表示可以保存。
+ */
+export function validateSlotsForSave(
+  slots: CaseSlot[],
+  matrices: TypeMatrix[],
+  otherCases: Array<{ code: string; slots: CaseSlot[] }>,
+): SlotSaveConflict[] {
+  const conflicts: SlotSaveConflict[] = [];
+  const matrixById = new Map(matrices.map((m) => [m.id, m]));
+  // 其他字盘已占用的字模 id → 字盘编号
+  const placedInOther = new Map<string, string>();
+  for (const c of otherCases) {
+    for (const s of c.slots) {
+      if (!placedInOther.has(s.matrixId)) placedInOther.set(s.matrixId, c.code);
+    }
+  }
+  const seenInThis = new Set<string>();
+  for (const s of slots) {
+    const cell = rcKey(s.row, s.col);
+    const fallbackCode = s.matrixCode || s.matrixId;
+    const m = matrixById.get(s.matrixId);
+    if (!m) {
+      conflicts.push({
+        kind: 'missing',
+        matrixId: s.matrixId,
+        matrixCode: fallbackCode,
+        character: s.character,
+        message: `格位 ${cell} 的字模 ${fallbackCode}（${s.character}）已被清退，档案中不存在该字模`,
+      });
+      continue;
+    }
+    if (m.availability !== '可用') {
+      conflicts.push({
+        kind: 'unavailable',
+        matrixId: s.matrixId,
+        matrixCode: m.code,
+        character: m.character,
+        message: `格位 ${cell} 的字模 ${m.code}（${m.character}）当前为「${m.availability}」，不可落位`,
+      });
+      continue;
+    }
+    const otherCode = placedInOther.get(s.matrixId);
+    if (otherCode) {
+      conflicts.push({
+        kind: 'duplicate',
+        matrixId: s.matrixId,
+        matrixCode: m.code,
+        character: m.character,
+        message: `字模 ${m.code}（${m.character}）已落位于字盘 ${otherCode}，一枚字模不能同时占两个格位`,
+      });
+      continue;
+    }
+    if (seenInThis.has(s.matrixId)) {
+      conflicts.push({
+        kind: 'duplicateInCase',
+        matrixId: s.matrixId,
+        matrixCode: m.code,
+        character: m.character,
+        message: `字模 ${m.code}（${m.character}）在本盘格位中重复出现`,
+      });
+    }
+    seenInThis.add(s.matrixId);
+  }
+  return conflicts;
 }

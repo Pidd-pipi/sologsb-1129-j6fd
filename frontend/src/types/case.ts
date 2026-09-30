@@ -14,6 +14,11 @@ export interface CaseSlot {
   col: number;
   character: string;
   matrixId: string;
+  /**
+   * 落位时冗余保存的字模编号（例：ZM-1985-007）。
+   * 字模被清退后仍可据此在冲突提示中指出编号；历史数据可能缺失，使用时回退 matrixId。
+   */
+  matrixCode?: string;
   /** 落位时间 */
   placedAt: string;
 }

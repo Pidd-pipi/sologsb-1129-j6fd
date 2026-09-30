@@ -87,7 +87,9 @@ export default function LayoutGrid({
                   >
                     <span className="font-song text-lg leading-none text-ink">{slot?.character ?? ''}</span>
                     {slot ? (
-                      <span className="mt-0.5 text-[9px] leading-none text-ink-mute">{slot.matrixId}</span>
+                      <span className="mt-0.5 max-w-full truncate text-[9px] leading-none text-ink-mute" title={slot.matrixId}>
+                        {slot.matrixCode ?? slot.matrixId}
+                      </span>
                     ) : (
                       <span className="text-[9px] leading-none text-ink-mute/70">
                         {pendingCharacter || `${r + 1}·${c + 1}`}
